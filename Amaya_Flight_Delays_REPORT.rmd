@@ -1,0 +1,381 @@
+---
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+<STYLE type="text/css">
+  H3 { text-align: center}
+  H4 { text-align: left}
+  tab1 { padding-left: 4em; }
+  tab2 { padding-left: 6em; }
+  tab3 { padding-left: 8em; }
+</STYLE>
+
+<P>
+<img src="https://www.ucm.es/al-acmes/file/logo-harvard-university/?ver" align="right" width="115"/>
+
+### **FLIGHT DELAYS PROJECT REPORT**
+<P/>
+
+```{r Setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+<div align="left">
+<P>
+**HARVARD UNIVERSITY**  
+\n***Professional Certificate in Data Science**  
+\n***Capstone Project \# 1**
+</p>
+<div/>
+<div align="right">
+**Andrés Amaya Chaves**  
+  \n ***July 21st, 2021**
+<div/>
+
+``` {r flights_raw download, echo=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(plyr)) install.packages("plyr", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(plyr)
+library(ggplot2)
+library(kableExtra)
+library(knitr)
+
+
+dl3 <- tempfile()
+download.file("https://drive.google.com/uc?export=download&id=1khjPRet2DJPkS1mjLwMPCuUWkI4Lzy1Q", dl3)
+
+# Note: this process could take a couple of minutes
+flights_rawREP <- fread(text = gsub("::", "\t", readLines(dl3)))
+rm(dl3)
+```
+
+#### **INTRODUCTION**
+
+<DIV align="justify">
+<P> This is a hands-on project that requires the application of previous knowledge and expertise about Data Science, mainly those in Machine Learning.
+
+<P> The present project uses a dataset called "Flight Delay and Causes", which contains flights trip details and multiple causes of delay; it is a public dataset available in <https://www.kaggle.com/undersc0re/flight-delay-and-causes>, so it is not licensed by anyone.
+
+<P> The following **Table 1** names the variables that compose the raw data of this public dataset, its meaning, and its units.
+
+**Table 1. Variables of the raw dataset "Flight Delay and Causes"**
+```{r Table 1, echo=FALSE}
+kbl(data.frame(VARIABLE = paste("**",(names(flights_rawREP)),"**", sep=""), DESCRIPTION = c("1 (Monday) - 7 (Sunday)", "Scheduled date",
+      "Actual departure time (local, hhmm)","Actual arrival time (local, hhmm)","Scheduled arrival time (local, hhmm)","Unique carrier code","Airline company","flight number",
+      "plane tail number","Actual time an airplane spends in the air(in minutes) with TaxiIn/Out","CRSElapsedTime","CRS Elapsed Time of Flight (estimated elapse time), in minutes",
+      "Flight Time (in minutes)","Difference in minutes between scheduled and actual arrival time","Origin IATA(International Air Transport Association) airport code","Origin Airport Name",
+      "Destination IATA code",
+      "Destination Airport Name",
+      "Distance between airports (miles)",
+      "Wheels down and arrival at the destination airport gate, in minutes",
+      "The time elapsed between departure from the origin airport gate and wheels off, in minutes",
+      "Was the flight canceled?",
+      "Reason for cancellation",
+      "1 = yes, 0 = no",
+      "Flight delay due to carrier(e.g. maintenance or crew problems, aircraft cleaning,       fueling, etc), 0 = No, yes = (in minutes)",
+      "Flight delay due to weather, 0 = No, yes = (in minutes)",
+      "Flight delay by NSA(National Aviation System), 0 = No, yes = (in minutes)",
+      "Flight delay by this reason, 0 = No, yes = (in minutes)",
+      "Flight delay by this reason, 0 = No, yes = (in minutes)"))) %>% 
+  kable_paper(full_width = F)  %>% 
+  column_spec(1, width = "10em")
+```
+
+<P> The raw dataset, _"Flight_delay"_, includes **`r nrow(flights_rawREP)`** entries that have a valid value for each of the **`r ncol(flights_rawREP)`** latter described in **Table 1**, which outputs a total of **`r nrow(flights_rawREP)*ncol(flights_rawREP)`** flights that took place between **`r length(unique(c(unique(flights_rawREP$Origin),unique(flights_rawREP$Dest))))`** unique origin/destination cities, performed from **`r min(flights_rawREP$Date)`** to **`r max(flights_rawREP$Date)`**. The original file weighs about 89.1 MB.
+
+<P> The present project employs a set of six _K-Nearest Neighbors_ models that differ in the k-value used to train the data, from which that yielding the lowest RMSE (Residual Mean Squared Error) error was selected to predict the 'Delay Range' over the previously created test set and then over the validation set.
+
+<P> For the training of the six _K-Nearest Neighbors_ models, it was necessary to randomly sample a subset of 75% of the original entries (rows), due to a lack of enough computational power to accomplish the calculations within a reasonable time. 
+
+<P> For that same cause, it was not predicted over the 'Delay' variable, but instead, it was predicted  another variable mutated from the dataset, in which delays were defined to be within 15-minute ranges, called 'DelayRange'. This way there was a reduction in the number of levels of the training set and its corresponding predictions, decreasing the computational cost.
+
+<P> The _"Flight_delay"_ dataset was split into a validation set, with a 10% size of the total entries, and a train-test dataset called _"subFlights"_ with the remaining 90%, for the development, test, and application of the machine learning algorithm. The _"subFlights"_ data set was also split, this time into training and test sets.
+
+<P> All K-nn models were built to make predictions of the Delay Range on a 15-minute basis, using the airline, flight distance, and the "weekSlot"<a href="#section1">[1]</a> as predictors.
+
+<p id="section1">[1] This is a number that refers to one of the `r 7*24` time-spaces of 60 minutes that compose a week.</p>
+
+<P> The goal of this capstone project is to reinforce, synthesize and apply the concepts learned all along with the **Professional Certificate Program**, as well as to have a rewarding experience with the development of a machine learning algorithm large real-world dataset.
+
+<br>
+
+</DIV>
+
+#### **METHODS**
+
+``` {r Table 2, echo=FALSE}
+Steps <- c('STAGE 0', paste('Step 0.',c(1, 2, 3), sep=''),
+          
+          'STAGE 1', paste('Step 1.',1, c('','.1','.2','.3'), sep=''),
+                     paste('Step 1.',2, c('',paste('.',1:5,sep='')), sep=''),
+                     paste('Step 1.',3, c('',paste('.',1:2,sep='')), sep=''),
+                     paste('Step 1.',4, c('',paste('.',1:2,sep='')), sep=''),
+                     'Step 1.5',
+          
+          'STAGE 2', paste('Step 2.',1:4, sep=''),
+                     paste('Step 2.',4, c(paste('.',1:3,sep='')), sep=''),
+                     paste('Step 2.',5:6, sep=''),
+                     paste('Step 2.6.', 1:2, sep=''),
+          
+          'STAGE 3', paste('Step 3.',1:5, sep='')
+          )
+
+Description <- c('DATA GATHERING','Install needed packages','Call needed libraries',
+                 'Gather raw DATA', 'DATA CLEANSING AND PREPARATION',
+                 'Cleanse the data','Select, format and mutate some columns',
+                 'Histogram of the departure time distribution over 60min slots over any day.','Histogram of the departure distribution over the days of week.','Select, format and mutate some columns',"'Build the 'Weekslot' column from 'DayOfWeek' and 'DepTimeSlot'","Eliminate 'Day of week', 'DepTime' and 'DepTimeSlot'","'DelayRange', rounding to the upper 15 minutes ranges","Replace Airline character names for integers folowing the 'AirlineCodes'","Histogram of the flight delay distribution, in minutes.","Data splitting",
+"'flights' splitting into validation set and subFlight set","'subFlights' splitting into training and test sets","Sample 75% of Train and Test sets.","Randomly sample 75% of the Train Set entries","Sample the Test Set in a tenth of the Train Set sample size.","Define function for the later calculation of Residual Mean Squared Error","TRAIN AND PREDICTION OF K.NEAREST NEIGHBORS MODELS","Train over the 'flTrainSample' dataset with 6 values of k.","Predict over 'flTestSample' (the TEST SET SAMPLE), with the just trained knn models and create a data frame with the predictions.","Calculate RMSE for the 6 sets of predictions an build a data frame with them.","Predict over the TEST SAMPLE SET","Calculate prediction accuracies of all built models over the TEST SAMPLE SET.","Determine the index of the max accuracy, and its corresponding k-value.","Show the Accuracy and RMSE results as a Knitr table, for the built models so far.","Show the results of the model that yields the highest accuracy, and that with the lowest RMSE.","Predict over 'flightsTest' (the TEST SET) with the trained knn model that minimizes RMSE error.","Calculate the corresponding RMSE and Accuracy.","Report RMSE and Accuracy for the predictions over the TEST SET.","PREDICT OVER VALIDATION SET","Predict over 'validaton' set, with the best knn model (that minimizes RMSE).","Calculate prediction RMSE error.","Calculate prediction accuracies of all built models over the TEST SAMPLE SET.","Report Accuracy and RMSE of the predictions over the validation set.","For the predictions over the validation set, report Accuracy, RMSE, Data Range Size, and the proportion of RMSE relating to data range.)")
+```
+
+<DIV align="justify">
+
+<P> The gathering of the raw data was performed with a 'download.file' statement over a temp file, from a _Google Drive URL_ that directly downloads a copy of the original dataset. The _Kaggle_ webpage does not allow a direct download without previous authentication, so the copy was made to keep the project reproducible. Once downloaded the data, a 'fread' function with a nested 'readLines' function built the data frame 'flights_raw', containing the variables in **Table 1**, above.
+
+<P> After selecting some variables and mutating some others, the 'createDataPartition' function from the 'caret' library was used to split the data: taking 10% to the validation set, and the remaining 90% to the training-test set, called 'subFlights' in code. After the initial 90-10% splitting, the 'subFlights' data frame was also split between test and training sets in 20% and 80% of the data, respectively.
+
+<P> The code was developed in 4 stages (from stage 0 to stage 3); next, in **Table 2**, there is a summary of the structure and the `r length(Steps)-4` steps taken to accomplish the preparation, creation, test, and validation of the model.
+
+**Table 2. Structure and steps to develop the machine learning model.**
+```{r Print Table 2, echo=FALSE}
+ kbl(data.frame(Steps, Description)) %>% kable_paper(full_width = F) %>% 
+  column_spec(1, width = "4.5em")
+```
+
+
+<P> The project process followed exactly the steps shown in **Table 2**. After the cleansing and preparation of the data, a 75% random sample of the training set was set apart to perform the training of the models. In Stage 2, a set of 6 _K-Nearest Neighbors_ models built over the training set sample was used to evaluate the convenience of their usage to predict over the test set.
+
+<P> The six k-values used were: k = {3, 5, 7, 9, 11, 13}. Each model was tested over a 75% random sample of the test set.
+
+<P> Among the tested models, the **3-Nearest Neighbors** gave the lowest RMSE error, while also yielded the lowest accuracy, on the other hand, the **13-Nearest Neighbors** exhibited the highest RMSE error, while had the highest accuracy. It was taken the decision to go forward with the model getting the lowest RMSE error, namely, the **3-Nearest Neighbors** one.
+
+Once selected this way, the **3-Nearest Neighbors** model was employed to make the proper prediction of the 'DelayRange' variable over the test set, and later over the validation set. In the next section, we can see some metrics that tell us how well the built model performs and other results.
+
+<br>
+</DIV>
+
+```{r preFlights download, echo=FALSE}
+dl4 <- tempfile()
+download.file("https://drive.google.com/uc?export=download&id=1IFvLAUbpxqqkvs3CDYdtwZBlW8-xzdoY",dl4)
+#https://drive.google.com/uc?export=download&id=1uOLBqiMOXcGbrYbhbUgMslgFxFaD_0F1
+preFlightsREP <- fread(text = gsub("::", "\t", readLines(dl4)))
+```
+
+#### **RESULTS**
+<DIV align="justify">
+
+<P> As an overview, in **Table 3** there is a summary of the dimensions of each of the 9 datasets with which the code deals.
+
+**Table 3. Dimensions of datasets**
+```{r Table 3, echo=FALSE}
+kbl(data.frame(Denomination=c('Main','1','2','2.1','2.2','2.2.1','2.2.1.1',
+                                    '2.2.2', '2.2.2.1'), 
+           Dataset = c("**flights_raw**","**preFlights**", "**flights**", 
+                       "**validation**","**subFlights**",
+                       "**flightsTest**", "**flTestSample**",
+                       "**flightsTrain**","**flTrainSample**"),
+           
+           Dimensions_Rows_x_Columns = c('484551 x 29','484551 x 6','484548 x 5',
+                                         '484548 x 5','436110 x 5',
+                                         '436092 x 5','87223 x 5',
+                                         '348877 x 5','261665 x 5')),align = c('l','l','c')) %>% kable_paper(full_width = F) %>% 
+  column_spec(1, width = "13em") 
+```
+
+<P> From the nearly-raw data (there was not any data partition yet), was created the following two histograms  (see **Figure 1**) that show the distribution of the flights' departure times over a 24-slot graph representing the 24 hours of a day (see **Figure 2**), and a 7-slot graph, related with the days of the week in which every flight was performed (in the whole data).
+
+<P> In **Figure 1**, every flight departing between 0:00 and 0:59, regardless of the date, is counted in slot '0', those within 1:00 and 1:59 belong to slot '1', and so on until those departing at 23:00 to 23:59.
+
+<P> In **Figure 2** we can see the departure distribution on the seven days of the week. From this we can conclude that most of the registered flights, from **`r min(flights_rawREP$Date)`** to **`r max(flights_rawREP$Date)`**, were done on Thursday and Friday, summing up together `r sum(preFlightsREP$DayOfWeek==4 | preFlightsREP$DayOfWeek==5)` flights in the period, which means `r round(100*sum(preFlightsREP$DayOfWeek==4 | preFlightsREP$DayOfWeek==5)/length(preFlightsREP$DayOfWeek),1)`% of the total flights, while Friday flights alone represent `r round(100*sum(preFlightsREP$DayOfWeek==5)/length(preFlightsREP$DayOfWeek),1)` % of them.
+
+
+```{r Fig1 Histogram DepTimeSlot, echo=FALSE, out.width=540, fig.align='center'}
+
+
+# DepTS <- factor(DepTime,levels =  DaysOfTheWeek)
+# 
+# ggplot(data.frame(c(1), DepTS), aes(x = DepTS))+ geom_bar() + 
+#   ggtitle("Departure Dist. on Days of the Week") + xlab ("Day of the Week")
+
+preFlightsREP %>%
+  qplot(DepTimeSlot, geom ="histogram",
+        main = "Departure Time Distibution",
+        ylab = "Count",
+        bins = 10, 
+        data = ., 
+        color = I("black"))
+```
+**Figure 1. Departure time distribution in 24-hour slots.**
+
+```{r  Fig2 DayofTheWeek, echo=FALSE, out.width=540, fig.align='center'}
+DaysOfTheWeek <- c('Mon','Tue','Wed','Thu','Fri','Sat','Sun')
+
+dayDistrib = preFlightsREP$DayOfWeek
+for (i in 1:length(DaysOfTheWeek)){
+  dayDistrib <- replace(dayDistrib, c(dayDistrib == i), DaysOfTheWeek[i])
+}
+dayD <- factor(dayDistrib,levels =  DaysOfTheWeek)
+
+ggplot(data.frame(c(1), dayD), aes(x = dayD))+ geom_bar() + 
+  ggtitle("Departure Dist. on Days of the Week") + xlab ("Day of the Week")
+```
+**Figure 2. Departure time distribution on the 7 days of the week.**
+
+In **Table 4** we can see the count of flights by airline, following the codes given to the 
+`r length(unique(preFlightsREP$Airline))` airlines present in the dataset, arranged from the most common airline to that with the fewest number of flights registered.
+
+**Table 4. Count of flights by airline.**
+```{r Table 4, echo=FALSE}
+Airline <- unique(preFlightsREP$Airline)
+C <- count(preFlightsREP$Airline)
+
+AirlineCodes <- data.frame(1:length(Airline), arrange(C,desc(freq))) 
+names(AirlineCodes) <- c("Code", "Airline", "Count")
+AirlineCodes <-AirlineCodes %>%
+  mutate(Percentage=
+           paste(100*round(Count/length(preFlightsREP$Airline),4),"%", sep=""))
+kbl(AirlineCodes, align = c('c','l','r','c')) %>% kable_paper(full_width = F)
+```
+
+Next, we concentrate on the distribution of the most important variable in this project, 'Flight Delay', because it is the variable that all the built models will predict; in **Figure 3** we can see a histogram of its distribution. This variable corresponds to the time difference between the scheduled arrival time and the corresponding actual time for all flights.
+
+```{r Fig 3 Delay Distribution, echo=FALSE, out.width=540, fig.align='center'}
+preFlightsREP %>% 
+  qplot(ArrDelay, geom ="histogram",
+        main = "Flight Delay Distibution",
+        ylab = "Count",
+        bins = 70, 
+        data = ., 
+        color = I("black"))
+```
+**Figure 3. Flight delay Distribution.**
+
+After the mentioned split performed over the original dataset, the k-nn models, trained with a 75% random sample of the training set, were proven to perform predictions over a 75% random sample of the test set, giving the RMSE summarized in **Figure 4**, and the accuracies shown in **Figure 5**.
+
+```{r Fig 4. knn_RMSE_Sample vs k, echo=FALSE, out.width=540, fig.align='center'}
+ks <- seq(3,13,2)
+knn_RMSE_Sample <- c(85.00153, 85.30602, 85.51130, 85.63245, 85.73238, 85.80806)
+plot(ks, knn_RMSE_Sample, main = "RMSE change with the k value", xlab=("k"))
+```
+**Figure 4. RMSE error of the six k-nn models, according to the k-value.**
+
+```{r Fig 5. Accuracies vs k, echo=FALSE, out.width=540, fig.align='center'}
+
+accuracies <- c(0.2428331, 0.2547678, 0.2631659, 0.2698922, 0.2764274, 0.2813957)
+plot(ks,accuracies, main = "Accuracy change with the k value", xlab=("k"))
+```  
+**Figure 5. Accuracy of the six k-nn models, according to the k-value.**
+
+**Table 5** summarizes the values of RMSE and accuracy for each of the applied machine learning models, over the sample test set, the test set, as well as over the validation set. Then, **Table 6** gives a summary of the best k-values found, which indicated the model to use over the (whole) test set.
+
+**Table 5. RMSE and accuracy values for each model.**
+```{r Table 5 RMSE results, echo=FALSE}
+rmse_results <- data.frame(Method = c("3-nn Over Sample Test Set",
+                                      "5-nn Over Sample Test Set",
+                                      "7-nn Over Sample Test Set",
+                                      "9-nn Over Sample Test Set",
+                                      "11-nn Over Sample Test Set",
+                                      "13-nn Over Sample Test Set",
+                                      "3-nn Over TEST SET",
+                                      "3-nn Over VALIDATION SET"),
+                           Accuracy = c(round(accuracies,4), 0.2391, 0.2409),
+                           RMSE = c(knn_RMSE_Sample, 85.84650, 84.35171))
+
+rmse_results %>% kbl(align = c('l','l','c')) %>% kable_paper(full_width = F)
+```
+<br>
+**Table 6. RMSE and accuracy values for each model.**
+```{r Table 6 Best ks, echo=FALSE}
+kbl(data.frame(Best_Metric = c("Highest Accuracy","Lowest RMSE"), 
+                  Method = c("13-nn Over Sample Datset", 
+                            "3-nn Over Sample Datset"),
+                  Accuracy = c(round(accuracies[6], 4), 
+                               round(accuracies[1], 4)),
+                  RMSE = c(round(knn_RMSE_Sample[6],4),
+                           round(knn_RMSE_Sample[1],4))), align = c('l','l','l','r')) %>% kable_paper(full_width = F)
+```
+
+```{r flightsTest & validation download, echo=FALSE}
+dl5 <- tempfile()
+download.file("https://drive.google.com/uc?export=download&id=1_EWnrRwL26HgGb_nLJhpzViGeRdH0TDP", dl5)
+dl6 <- tempfile()
+download.file("https://drive.google.com/uc?export=download&id=16rZ9GCd7XDYZqcTK-74_lGOUq-d44Djj", dl6)
+
+flightsTest <- as.data.frame(read.csv(dl5))
+validationREP <- as.data.frame(read.csv(dl6))
+```
+<br>
+<P> As we can see in **Table 6**, in this problem a **_3-Nearest Neighbor_** model minimizes de RMSE error, while the trained **_13-Nearest Neighbor_** model maximizes the accuracy among the considered models. So, finally, the recently trained **_3-Nearest Neighbor_** model was used over the test set, and later over the validation set. 
+
+<P> Note that the model was trained with a **75% random sample** of the training set, while it gave predictions over the whole test set, which just means that it was trained with less input information, therefore it could output slightly less accurate results, compared with hypothetically having trained with the whole training set.
+
+<P> So we can say that the built model makes predictions with an RMSE error of `r knn_RMSE_Sample[1]` minutes over the validation set, which means that using this model there is a high probability that the error in single predictions of the _delay range_ of flights is less or equal to +/- `r round(knn_RMSE_Sample[1],1)` minutes. 
+
+<P> Since the 'DelayRange' variable ranges from `r min(validationREP$DelayRange)` to `r max(validationREP$DelayRange)` minutes in the validation set, the latter RMSE error represents the `r round(100*84.3517125153329/(max(validationREP$DelayRange)-min(validationREP$DelayRange)),4)` % of that range, not a bad result for this machine learning model.
+
+Finally, in **Table 7** we can see a summary of the metrics for the 3-Nearest Neighbors model applied over the test set and the validation set, to have an overview of its performance.
+
+**Table 7. Final performance summary.**
+```{r Final Table, echo=FALSE}
+final <- data.frame(Method = c(paste(3,"nn Over TEST SET", sep = ""),
+                               paste(3,"nn Over VALIDATION SET", sep = "")),
+                    Accuracy = c(0.2390,0.2409),
+                    RMSE = c(85.85, 84.35),
+                    Delay_min = c(15,15),
+                    Delay_max = c(1155,1140))
+
+kbl(final %>% mutate(Range_Size = Delay_max - Delay_min,
+                          Range_Percentage_RMSE = paste(round(100*RMSE/Range_Size,2),'%')),align = c('l','c','c','c','c','c','c')) %>% kable_paper(full_width = F)
+```
+
+Note that in the original raw data there is no negative value in the 'ArrTime' variable, its range is between `r min(flights_rawREP$ArrTime)` and `r max(flights_rawREP$ArrTime)` minutes, therefore no registered flight arrived before the scheduled time. This does not imply that the prediction error cannot be negative, because any prediction can output a lower value than the actual delay range.
+
+<br>
+<DIV/>
+
+#### **OBSERVATIONS**
+
+<DIV align="justify">
+
+<br>  • From **Figure 1**, we can say that most of the flights are performed departing between 15:00 and 20:00, regardless of the airline, the distance of the flight, or the day of the week.
+
+<br>  • From **Figure 2**, we can conclude that Thursday and Friday are the most common days of the week in which flights are done. 
+
+<br>  • From **Table 4**, it is observed that Southwest Airlines Co. operates most of the flights registered in the dataset, while American Airlines Inc. is second in the number of flights.
+
+<br>  • From **Figure 3**, we can see a confidence interval between 0 and 250 minutes of flight delay, yielding a high probability. There is no flight with negative delay (arriving before the scheduled time).
+
+<br>  • **Figures 4 and 5**, and **Table 5**, show us that with this dataset, increasing the number of neighbors of the k-nn model produces a higher RMSE error but a higher accuracy in the predictions.
+
+<br>
+<DIV/>
+
+#### **CONCLUSIONS**
+
+<DIV align="justify">
+<P>  • The built 3-Nearest Neighbors model was capable of making predictions over the test set and the validation set, with an RMSE error of 85.85 minutes and 84.35 minutes, respectively; which represents **7.53%**, and **7.50%** of the respective range sizes.
+
+<P>  • Therefore, the trained 3-Nearest Neighbors model is capable of predicting the arrival delay range of flights, on a 15-minute basis, with an error below 90 minutes, provided the airline, the flight distance, and the time & day of the week.
+
+<P> • The model outputs predictions with higher accuracy and lower RMSE error when applied over the test set than when applied over the validation set. 
+
+<P> • However, the RMSE is an absolute measure; when we calculate the proportion of RMSE error regarding the range size, we find that the model performs better in the validation set (commits less relative error), which has about 48450 more rows than its counterpart (test set is 10% smaller than validation set).
+
+<P> • The model was trained with a 75% sample of the training set, which barely represents 54% of the original number of rows (484551).
+
+<P> • While proving the K-values, an increment of them resulted consistently in more RMSE error but more accuracy, when predicting over the test set, as we can see in **Figures 4 and 5**. The lowest RMSE error was preferred.
+<DIV/>
